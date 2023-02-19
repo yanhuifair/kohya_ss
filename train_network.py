@@ -475,7 +475,8 @@ def train(args):
 
       if args.logging_dir is not None:
         logs = generate_step_logs(args, current_loss, avr_loss, lr_scheduler)
-        logs['lr/d*lr'] = optimizer.param_groups[0]['d']*optimizer.param_groups[0]['lr']
+        logs['lr/d*lr0'] = optimizer.param_groups[0]['d']*optimizer.param_groups[0]['lr']
+        logs['lr/d*lr1'] = optimizer.param_groups[1]['d']*optimizer.param_groups[1]['lr']
         accelerator.log(logs, step=global_step)
 
       if global_step >= args.max_train_steps:
