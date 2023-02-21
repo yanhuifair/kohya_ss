@@ -245,7 +245,7 @@ def train(args):
   
   # For Adam
   lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer,
-                                        lr_lambda=[lambda epoch: 0.25, lambda epoch: 1],
+                                        lr_lambda=[lambda epoch: 0.5, lambda epoch: 1],
                                         last_epoch=-1,
                                         verbose=False)
   
