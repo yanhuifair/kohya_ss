@@ -185,16 +185,16 @@ def train(args):
   #     args.lr_scheduler, optimizer, num_warmup_steps=args.lr_warmup_steps, num_training_steps=args.max_train_steps * args.gradient_accumulation_steps)
 
   # For Adam
-  # lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer,
-  #                                       lr_lambda=[lambda epoch: 1],
-  #                                       last_epoch=-1,
-  #                                       verbose=False)
-  
-  # For SGD optim
   lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer,
                                         lr_lambda=[lambda epoch: 1],
                                         last_epoch=-1,
-                                        verbose=True)
+                                        verbose=False)
+  
+  # For SGD optim
+  # lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer,
+  #                                       lr_lambda=[lambda epoch: 1],
+  #                                       last_epoch=-1,
+  #                                       verbose=True)
 
   # 実験的機能：勾配も含めたfp16学習を行う　モデル全体をfp16にする
   if args.full_fp16:
