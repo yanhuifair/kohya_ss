@@ -74,7 +74,7 @@ def save_configuration(
     save_precision,
     seed,
     num_cpu_threads_per_process,
-    cache_latents,
+    cache_latents,cache_latents_to_disk,
     caption_extension,
     enable_bucket,
     gradient_checkpointing,
@@ -116,6 +116,8 @@ def save_configuration(
     optimizer,
     optimizer_args,
     noise_offset,
+    multires_noise_iterations,
+    multires_noise_discount,
     LoRA_type,
     conv_dim,
     conv_alpha,
@@ -126,8 +128,19 @@ def save_configuration(
     additional_parameters,
     vae_batch_size,
     min_snr_gamma,
-    down_lr_weight,mid_lr_weight,up_lr_weight,block_lr_zero_threshold,block_dims,block_alphas,conv_dims,conv_alphas,
-    weighted_captions,unit,
+    down_lr_weight,
+    mid_lr_weight,
+    up_lr_weight,
+    block_lr_zero_threshold,
+    block_dims,
+    block_alphas,
+    conv_dims,
+    conv_alphas,
+    weighted_captions,
+    unit,
+    save_every_n_steps,
+    save_last_n_steps,
+    save_last_n_steps_state,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -195,7 +208,7 @@ def open_configuration(
     save_precision,
     seed,
     num_cpu_threads_per_process,
-    cache_latents,
+    cache_latents,cache_latents_to_disk,
     caption_extension,
     enable_bucket,
     gradient_checkpointing,
@@ -237,6 +250,8 @@ def open_configuration(
     optimizer,
     optimizer_args,
     noise_offset,
+    multires_noise_iterations,
+    multires_noise_discount,
     LoRA_type,
     conv_dim,
     conv_alpha,
@@ -247,8 +262,19 @@ def open_configuration(
     additional_parameters,
     vae_batch_size,
     min_snr_gamma,
-    down_lr_weight,mid_lr_weight,up_lr_weight,block_lr_zero_threshold,block_dims,block_alphas,conv_dims,conv_alphas,
-    weighted_captions,unit,
+    down_lr_weight,
+    mid_lr_weight,
+    up_lr_weight,
+    block_lr_zero_threshold,
+    block_dims,
+    block_alphas,
+    conv_dims,
+    conv_alphas,
+    weighted_captions,
+    unit,
+    save_every_n_steps,
+    save_last_n_steps,
+    save_last_n_steps_state,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -307,7 +333,7 @@ def train_model(
     save_precision,
     seed,
     num_cpu_threads_per_process,
-    cache_latents,
+    cache_latents,cache_latents_to_disk,
     caption_extension,
     enable_bucket,
     gradient_checkpointing,
@@ -349,6 +375,8 @@ def train_model(
     optimizer,
     optimizer_args,
     noise_offset,
+    multires_noise_iterations,
+    multires_noise_discount,
     LoRA_type,
     conv_dim,
     conv_alpha,
@@ -359,8 +387,19 @@ def train_model(
     additional_parameters,
     vae_batch_size,
     min_snr_gamma,
-    down_lr_weight,mid_lr_weight,up_lr_weight,block_lr_zero_threshold,block_dims,block_alphas,conv_dims,conv_alphas,
-    weighted_captions,unit,
+    down_lr_weight,
+    mid_lr_weight,
+    up_lr_weight,
+    block_lr_zero_threshold,
+    block_dims,
+    block_alphas,
+    conv_dims,
+    conv_alphas,
+    weighted_captions,
+    unit,
+    save_every_n_steps,
+    save_last_n_steps,
+    save_last_n_steps_state,
 ):
     print_only_bool = True if print_only.get('label') == 'True' else False
 
@@ -388,6 +427,17 @@ def train_model(
     if int(bucket_reso_steps) < 1:
         msgbox('Bucket resolution steps need to be greater than 0')
         return
+    
+    if noise_offset == '':
+        noise_offset = 0
+        
+    if float(noise_offset) > 1 or float(noise_offset) < 0:
+        msgbox('Noise offset need to be a value between 0 and 1')
+        return
+    
+    if float(noise_offset) > 0 and (multires_noise_iterations > 0 or multires_noise_discount > 0):
+        msgbox(msg='noise offset and multires_noise can\'t be set at the same time. Only use one or the other.', title='Error')
+        return
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -400,9 +450,12 @@ def train_model(
 
     if check_if_model_exist(output_name, output_dir, save_model_as):
         return
-    
+
     if optimizer == 'Adafactor' and lr_warmup != '0':
-        msgbox("Warning: lr_scheduler is set to 'Adafactor', so 'LR warmup (% of steps)' will be considered 0.", title="Warning")
+        msgbox(
+            "Warning: lr_scheduler is set to 'Adafactor', so 'LR warmup (% of steps)' will be considered 0.",
+            title='Warning',
+        )
         lr_warmup = '0'
 
     # If string is empty set string to 0.
@@ -410,12 +463,6 @@ def train_model(
         text_encoder_lr = 0
     if unet_lr == '':
         unet_lr = 0
-
-    # if (float(text_encoder_lr) == 0) and (float(unet_lr) == 0):
-    #     msgbox(
-    #         'At least one Learning Rate value for "Text encoder" or "Unet" need to be provided'
-    #     )
-    #     return
 
     # Get a list of all subfolders in train_data_dir
     subfolders = [
@@ -431,7 +478,7 @@ def train_model(
         try:
             # Extract the number of repeats from the folder name
             repeats = int(folder.split('_')[0])
-            
+
             # Count the number of images in the folder
             num_images = len(
                 [
@@ -455,10 +502,20 @@ def train_model(
             print(f'Folder {folder}: {steps} steps')
 
             total_steps += steps
-            
+
         except ValueError:
             # Handle the case where the folder name does not contain an underscore
-            print(f"Error: '{folder}' does not contain an underscore, skipping...")    
+            print(
+                f"Error: '{folder}' does not contain an underscore, skipping..."
+            )
+
+    if reg_data_dir == '':
+        reg_factor = 1
+    else:
+        print(
+            '\033[94mRegularisation images are used... Will double the number of steps required...\033[0m'
+        )
+        reg_factor = 2
 
     # calculate max_train_steps
     max_train_steps = int(
@@ -466,7 +523,7 @@ def train_model(
             float(total_steps)
             / int(train_batch_size)
             * int(epoch)
-            # * int(reg_factor)
+            * int(reg_factor)
         )
     )
     print(f'max_train_steps = {max_train_steps}')
@@ -535,13 +592,25 @@ def train_model(
             return
         run_cmd += f' --network_module=lycoris.kohya'
         run_cmd += f' --network_args "conv_dim={conv_dim}" "conv_alpha={conv_alpha}" "algo=loha"'
-    
-        
+
     if LoRA_type in ['Kohya LoCon', 'Standard']:
-        kohya_lora_var_list = ['down_lr_weight', 'mid_lr_weight', 'up_lr_weight', 'block_lr_zero_threshold', 'block_dims', 'block_alphas', 'conv_dims', 'conv_alphas']
-        
+        kohya_lora_var_list = [
+            'down_lr_weight',
+            'mid_lr_weight',
+            'up_lr_weight',
+            'block_lr_zero_threshold',
+            'block_dims',
+            'block_alphas',
+            'conv_dims',
+            'conv_alphas',
+        ]
+
         run_cmd += f' --network_module=networks.lora'
-        kohya_lora_vars = {key: value for key, value in vars().items() if key in kohya_lora_var_list and value}
+        kohya_lora_vars = {
+            key: value
+            for key, value in vars().items()
+            if key in kohya_lora_var_list and value
+        }
 
         network_args = ''
         if LoRA_type == 'Kohya LoCon':
@@ -553,12 +622,28 @@ def train_model(
 
         if network_args:
             run_cmd += f' --network_args{network_args}'
-            
+
     if LoRA_type in ['Kohya DyLoRA']:
-        kohya_lora_var_list = ['conv_dim', 'conv_alpha', 'down_lr_weight', 'mid_lr_weight', 'up_lr_weight', 'block_lr_zero_threshold', 'block_dims', 'block_alphas', 'conv_dims', 'conv_alphas', 'unit']
-        
+        kohya_lora_var_list = [
+            'conv_dim',
+            'conv_alpha',
+            'down_lr_weight',
+            'mid_lr_weight',
+            'up_lr_weight',
+            'block_lr_zero_threshold',
+            'block_dims',
+            'block_alphas',
+            'conv_dims',
+            'conv_alphas',
+            'unit',
+        ]
+
         run_cmd += f' --network_module=networks.dylora'
-        kohya_lora_vars = {key: value for key, value in vars().items() if key in kohya_lora_var_list and value}
+        kohya_lora_vars = {
+            key: value
+            for key, value in vars().items()
+            if key in kohya_lora_var_list and value
+        }
 
         network_args = ''
 
@@ -580,7 +665,7 @@ def train_model(
             run_cmd += f' --unet_lr={unet_lr}'
             run_cmd += f' --network_train_unet_only'
     else:
-        if float(text_encoder_lr) == 0:
+        if float(learning_rate) == 0:
             msgbox('Please input learning rate values.')
             return
 
@@ -611,6 +696,7 @@ def train_model(
         seed=seed,
         caption_extension=caption_extension,
         cache_latents=cache_latents,
+        cache_latents_to_disk=cache_latents_to_disk,
         optimizer=optimizer,
         optimizer_args=optimizer_args,
     )
@@ -638,9 +724,14 @@ def train_model(
         caption_dropout_every_n_epochs=caption_dropout_every_n_epochs,
         caption_dropout_rate=caption_dropout_rate,
         noise_offset=noise_offset,
+        multires_noise_iterations=multires_noise_iterations,
+        multires_noise_discount=multires_noise_discount,
         additional_parameters=additional_parameters,
         vae_batch_size=vae_batch_size,
         min_snr_gamma=min_snr_gamma,
+        save_every_n_steps=save_every_n_steps,
+        save_last_n_steps=save_last_n_steps,
+        save_last_n_steps_state=save_last_n_steps_state,
     )
 
     run_cmd += run_cmd_sample(
@@ -650,7 +741,7 @@ def train_model(
         sample_prompts,
         output_dir,
     )
-    
+
     # if not down_lr_weight == '':
     #     run_cmd += f' --down_lr_weight="{down_lr_weight}"'
     # if not mid_lr_weight == '':
@@ -667,9 +758,6 @@ def train_model(
     #     run_cmd += f' --conv_dims="{conv_dims}"'
     # if not conv_alphas == '':
     #     run_cmd += f' --conv_alphas="{conv_alphas}"'
-        
-
-
 
     if print_only_bool:
         print(
@@ -840,7 +928,7 @@ def lora_tab(
             num_cpu_threads_per_process,
             seed,
             caption_extension,
-            cache_latents,
+            cache_latents,cache_latents_to_disk,
             optimizer,
             optimizer_args,
         ) = gradio_training(
@@ -850,15 +938,15 @@ def lora_tab(
         )
 
         with gr.Row():
-            text_encoder_lr = gr.Textbox(
+            text_encoder_lr = gr.Number(
                 label='Text Encoder learning rate',
                 value='5e-5',
-                placeholder='Optional',
+                info='Optional',
             )
-            unet_lr = gr.Textbox(
+            unet_lr = gr.Number(
                 label='Unet learning rate',
                 value='0.0001',
-                placeholder='Optional',
+                info='Optional',
             )
             network_dim = gr.Slider(
                 minimum=1,
@@ -903,17 +991,27 @@ def lora_tab(
                 step=1,
                 interactive=True,
             )
-            
+
         # Show of hide LoCon conv settings depending on LoRA type selection
         def update_LoRA_settings(LoRA_type):
             # Print a message when LoRA type is changed
             print('LoRA type changed...')
 
             # Determine if LoCon_row should be visible based on LoRA_type
-            LoCon_row = LoRA_type in {'LoCon', 'Kohya DyLoRA', 'Kohya LoCon', 'LyCORIS/LoHa', 'LyCORIS/LoCon'}
+            LoCon_row = LoRA_type in {
+                'LoCon',
+                'Kohya DyLoRA',
+                'Kohya LoCon',
+                'LyCORIS/LoHa',
+                'LyCORIS/LoCon',
+            }
 
             # Determine if LoRA_type_change should be visible based on LoRA_type
-            LoRA_type_change = LoRA_type in {'Standard', 'Kohya DyLoRA', 'Kohya LoCon'}
+            LoRA_type_change = LoRA_type in {
+                'Standard',
+                'Kohya DyLoRA',
+                'Kohya LoCon',
+            }
 
             # Determine if kohya_dylora_visible should be visible based on LoRA_type
             kohya_dylora_visible = LoRA_type == 'Kohya DyLoRA'
@@ -924,7 +1022,6 @@ def lora_tab(
                 gr.Group.update(visible=LoRA_type_change),
                 gr.Group.update(visible=kohya_dylora_visible),
             )
-
 
         with gr.Row():
             max_resolution = gr.Textbox(
@@ -941,9 +1038,12 @@ def lora_tab(
                 label='Stop text encoder training',
                 info='After what % of steps should the text encoder stop being trained. 0 = train for all steps.',
             )
-            enable_bucket = gr.Checkbox(label='Enable buckets', value=True,
-                info='Allow non similar resolution dataset images to be trained on.',)
-            
+            enable_bucket = gr.Checkbox(
+                label='Enable buckets',
+                value=True,
+                info='Allow non similar resolution dataset images to be trained on.',
+            )
+
         with gr.Accordion('Advanced Configuration', open=False):
             with gr.Row(visible=True) as kohya_advanced_lora:
                 with gr.Tab(label='Weights'):
@@ -951,46 +1051,46 @@ def lora_tab(
                         down_lr_weight = gr.Textbox(
                             label='Down LR weights',
                             placeholder='(Optional) eg: 0,0,0,0,0,0,1,1,1,1,1,1',
-                            info='Specify the learning rate weight of the down blocks of U-Net.'
+                            info='Specify the learning rate weight of the down blocks of U-Net.',
                         )
                         mid_lr_weight = gr.Textbox(
                             label='Mid LR weights',
                             placeholder='(Optional) eg: 0.5',
-                            info='Specify the learning rate weight of the mid block of U-Net.'
+                            info='Specify the learning rate weight of the mid block of U-Net.',
                         )
                         up_lr_weight = gr.Textbox(
                             label='Up LR weights',
                             placeholder='(Optional) eg: 0,0,0,0,0,0,1,1,1,1,1,1',
-                            info='Specify the learning rate weight of the up blocks of U-Net. The same as down_lr_weight.'
+                            info='Specify the learning rate weight of the up blocks of U-Net. The same as down_lr_weight.',
                         )
                         block_lr_zero_threshold = gr.Textbox(
                             label='Blocks LR zero threshold',
                             placeholder='(Optional) eg: 0.1',
-                            info='If the weight is not more than this value, the LoRA module is not created. The default is 0.'
+                            info='If the weight is not more than this value, the LoRA module is not created. The default is 0.',
                         )
                 with gr.Tab(label='Blocks'):
                     with gr.Row(visible=True):
                         block_dims = gr.Textbox(
                             label='Block dims',
                             placeholder='(Optional) eg: 2,2,2,2,4,4,4,4,6,6,6,6,8,6,6,6,6,4,4,4,4,2,2,2,2',
-                            info='Specify the dim (rank) of each block. Specify 25 numbers.'
+                            info='Specify the dim (rank) of each block. Specify 25 numbers.',
                         )
                         block_alphas = gr.Textbox(
                             label='Block alphas',
                             placeholder='(Optional) eg: 2,2,2,2,4,4,4,4,6,6,6,6,8,6,6,6,6,4,4,4,4,2,2,2,2',
-                            info='Specify the alpha of each block. Specify 25 numbers as with block_dims. If omitted, the value of network_alpha is used.'
+                            info='Specify the alpha of each block. Specify 25 numbers as with block_dims. If omitted, the value of network_alpha is used.',
                         )
                 with gr.Tab(label='Conv'):
                     with gr.Row(visible=True):
                         conv_dims = gr.Textbox(
                             label='Conv dims',
                             placeholder='(Optional) eg: 2,2,2,2,4,4,4,4,6,6,6,6,8,6,6,6,6,4,4,4,4,2,2,2,2',
-                            info='Expand LoRA to Conv2d 3x3 and specify the dim (rank) of each block. Specify 25 numbers.'
+                            info='Expand LoRA to Conv2d 3x3 and specify the dim (rank) of each block. Specify 25 numbers.',
                         )
                         conv_alphas = gr.Textbox(
                             label='Conv alphas',
                             placeholder='(Optional) eg: 2,2,2,2,4,4,4,4,6,6,6,6,8,6,6,6,6,4,4,4,4,2,2,2,2',
-                            info='Specify the alpha of each block when expanding LoRA to Conv2d 3x3. Specify 25 numbers. If omitted, the value of conv_alpha is used.'
+                            info='Specify the alpha of each block when expanding LoRA to Conv2d 3x3. Specify 25 numbers. If omitted, the value of conv_alpha is used.',
                         )
             with gr.Row():
                 no_token_padding = gr.Checkbox(
@@ -1000,7 +1100,9 @@ def lora_tab(
                     label='Gradient accumulate steps', value='1'
                 )
                 weighted_captions = gr.Checkbox(
-                    label='Weighted captions', value=False, info='Enable weighted captions in the standard style (token:1.3). No commas inside parens, or shuffle/dropout may break the decoder.',
+                    label='Weighted captions',
+                    value=False,
+                    info='Enable weighted captions in the standard style (token:1.3). No commas inside parens, or shuffle/dropout may break the decoder.',
                 )
             with gr.Row():
                 prior_loss_weight = gr.Number(
@@ -1038,9 +1140,14 @@ def lora_tab(
                 caption_dropout_every_n_epochs,
                 caption_dropout_rate,
                 noise_offset,
+                multires_noise_iterations,
+                multires_noise_discount,
                 additional_parameters,
                 vae_batch_size,
                 min_snr_gamma,
+                save_every_n_steps,
+                save_last_n_steps,
+                save_last_n_steps_state,
             ) = gradio_advanced_training()
             color_aug.change(
                 color_aug_changed,
@@ -1054,9 +1161,11 @@ def lora_tab(
             sample_sampler,
             sample_prompts,
         ) = sample_gradio_config()
-        
+
         LoRA_type.change(
-            update_LoRA_settings, inputs=[LoRA_type], outputs=[LoCon_row, kohya_advanced_lora, kohya_dylora]
+            update_LoRA_settings,
+            inputs=[LoRA_type],
+            outputs=[LoCon_row, kohya_advanced_lora, kohya_dylora],
         )
 
     with gr.Tab('Tools'):
@@ -1112,7 +1221,7 @@ def lora_tab(
         save_precision,
         seed,
         num_cpu_threads_per_process,
-        cache_latents,
+        cache_latents,cache_latents_to_disk,
         caption_extension,
         enable_bucket,
         gradient_checkpointing,
@@ -1154,6 +1263,8 @@ def lora_tab(
         optimizer,
         optimizer_args,
         noise_offset,
+        multires_noise_iterations,
+        multires_noise_discount,
         LoRA_type,
         conv_dim,
         conv_alpha,
@@ -1164,8 +1275,19 @@ def lora_tab(
         additional_parameters,
         vae_batch_size,
         min_snr_gamma,
-        down_lr_weight,mid_lr_weight,up_lr_weight,block_lr_zero_threshold,block_dims,block_alphas,conv_dims,conv_alphas,
-        weighted_captions, unit,
+        down_lr_weight,
+        mid_lr_weight,
+        up_lr_weight,
+        block_lr_zero_threshold,
+        block_dims,
+        block_alphas,
+        conv_dims,
+        conv_alphas,
+        weighted_captions,
+        unit,
+        save_every_n_steps,
+        save_last_n_steps,
+        save_last_n_steps_state,
     ]
 
     button_open_config.click(

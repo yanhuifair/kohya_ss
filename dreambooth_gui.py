@@ -68,6 +68,7 @@ def save_configuration(
     seed,
     num_cpu_threads_per_process,
     cache_latents,
+    cache_latents_to_disk,
     caption_extension,
     enable_bucket,
     gradient_checkpointing,
@@ -102,13 +103,19 @@ def save_configuration(
     optimizer,
     optimizer_args,
     noise_offset,
+    multires_noise_iterations,
+    multires_noise_discount,
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
     sample_prompts,
     additional_parameters,
     vae_batch_size,
-    min_snr_gamma,weighted_captions,
+    min_snr_gamma,
+    weighted_captions,
+    save_every_n_steps,
+    save_last_n_steps,
+    save_last_n_steps_state,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -177,6 +184,7 @@ def open_configuration(
     seed,
     num_cpu_threads_per_process,
     cache_latents,
+    cache_latents_to_disk,
     caption_extension,
     enable_bucket,
     gradient_checkpointing,
@@ -211,13 +219,19 @@ def open_configuration(
     optimizer,
     optimizer_args,
     noise_offset,
+    multires_noise_iterations,
+    multires_noise_discount,
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
     sample_prompts,
     additional_parameters,
     vae_batch_size,
-    min_snr_gamma,weighted_captions,
+    min_snr_gamma,
+    weighted_captions,
+    save_every_n_steps,
+    save_last_n_steps,
+    save_last_n_steps_state,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -268,6 +282,7 @@ def train_model(
     seed,
     num_cpu_threads_per_process,
     cache_latents,
+    cache_latents_to_disk,
     caption_extension,
     enable_bucket,
     gradient_checkpointing,
@@ -302,13 +317,19 @@ def train_model(
     optimizer,
     optimizer_args,
     noise_offset,
+    multires_noise_iterations,
+    multires_noise_discount,
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
     sample_prompts,
     additional_parameters,
     vae_batch_size,
-    min_snr_gamma,weighted_captions,
+    min_snr_gamma,
+    weighted_captions,
+    save_every_n_steps,
+    save_last_n_steps,
+    save_last_n_steps_state,
 ):
     if pretrained_model_name_or_path == '':
         msgbox('Source model information is missing')
@@ -333,10 +354,17 @@ def train_model(
 
     if check_if_model_exist(output_name, output_dir, save_model_as):
         return
-    
+
     if optimizer == 'Adafactor' and lr_warmup != '0':
-        msgbox("Warning: lr_scheduler is set to 'Adafactor', so 'LR warmup (% of steps)' will be considered 0.", title="Warning")
+        msgbox(
+            "Warning: lr_scheduler is set to 'Adafactor', so 'LR warmup (% of steps)' will be considered 0.",
+            title='Warning',
+        )
         lr_warmup = '0'
+        
+    if float(noise_offset) > 0 and (multires_noise_iterations > 0 or multires_noise_discount > 0):
+        msgbox(msg='noise offset and multires_noise can\'t be set at the same time. Only use one or the other.', title='Error')
+        return
 
     # Get a list of all subfolders in train_data_dir, excluding hidden folders
     subfolders = [
@@ -495,6 +523,7 @@ def train_model(
         seed=seed,
         caption_extension=caption_extension,
         cache_latents=cache_latents,
+        cache_latents_to_disk=cache_latents_to_disk,
         optimizer=optimizer,
         optimizer_args=optimizer_args,
     )
@@ -522,9 +551,14 @@ def train_model(
         caption_dropout_every_n_epochs=caption_dropout_every_n_epochs,
         caption_dropout_rate=caption_dropout_rate,
         noise_offset=noise_offset,
+        multires_noise_iterations=multires_noise_iterations,
+        multires_noise_discount=multires_noise_discount,
         additional_parameters=additional_parameters,
         vae_batch_size=vae_batch_size,
         min_snr_gamma=min_snr_gamma,
+        save_every_n_steps=save_every_n_steps,
+        save_last_n_steps=save_last_n_steps,
+        save_last_n_steps_state=save_last_n_steps_state,
     )
 
     run_cmd += run_cmd_sample(
@@ -664,6 +698,7 @@ def dreambooth_tab(
             seed,
             caption_extension,
             cache_latents,
+            cache_latents_to_disk,
             optimizer,
             optimizer_args,
         ) = gradio_training(
@@ -733,9 +768,14 @@ def dreambooth_tab(
                 caption_dropout_every_n_epochs,
                 caption_dropout_rate,
                 noise_offset,
+                multires_noise_iterations,
+                multires_noise_discount,
                 additional_parameters,
                 vae_batch_size,
                 min_snr_gamma,
+                save_every_n_steps,
+                save_last_n_steps,
+                save_last_n_steps_state,
             ) = gradio_advanced_training()
             color_aug.change(
                 color_aug_changed,
@@ -797,6 +837,7 @@ def dreambooth_tab(
         seed,
         num_cpu_threads_per_process,
         cache_latents,
+        cache_latents_to_disk,
         caption_extension,
         enable_bucket,
         gradient_checkpointing,
@@ -831,6 +872,8 @@ def dreambooth_tab(
         optimizer,
         optimizer_args,
         noise_offset,
+        multires_noise_iterations,
+        multires_noise_discount,
         sample_every_n_steps,
         sample_every_n_epochs,
         sample_sampler,
@@ -839,6 +882,9 @@ def dreambooth_tab(
         vae_batch_size,
         min_snr_gamma,
         weighted_captions,
+        save_every_n_steps,
+        save_last_n_steps,
+        save_last_n_steps_state,
     ]
 
     button_open_config.click(
