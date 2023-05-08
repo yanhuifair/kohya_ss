@@ -29,6 +29,14 @@ echo [1] - v1 (torch 1.12.1) (Recommended)
 echo [2] - v2 (torch 2.0.0) (Experimental)
 set /p choice="Enter your choice (1 or 2): "
 
+
+:: Only does this section to cleanup the old custom dll versions that we used to use. No longer needed now with the new bitsandbytes version
+pip uninstall -y bitsandbytes
+IF EXIST ".\venv\Lib\site-packages\bitsandbytes" (
+    rmdir .\venv\Lib\site-packages\bitsandbytes
+)
+:::::::::::::::::::::::::
+
 if %choice%==1 (
     pip install torch==1.12.1+cu116 torchvision==0.13.1+cu116 --extra-index-url https://download.pytorch.org/whl/cu116
     pip install --use-pep517 --upgrade -r requirements.txt
