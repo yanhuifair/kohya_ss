@@ -56,3 +56,5 @@ python.exe .\tools\update_bitsandbytes.py
 @REM copy /y .\bitsandbytes_windows\main.py .\venv\Lib\site-packages\bitsandbytes\cuda_setup\main.py
 
 accelerate config
+
+pause
